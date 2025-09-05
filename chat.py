@@ -1,29 +1,54 @@
 import streamlit as st
-import requests  # ✅ yeh missing tha, ab add kar diya
+import pickle, os
+import numpy as np
+from sentence_transformers import SentenceTransformer
 
+# -----------------------
+# Load model & data
+# -----------------------
+@st.cache_resource
+def load_model():
+    return SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+
+@st.cache_resource
+def load_data():
+    try:
+        embeddings = np.load("data/index/embeddings.npy")
+        with open("data/index/docs.pkl", "rb") as f:
+            documents = pickle.load(f)
+        return embeddings, documents
+    except Exception as e:
+        st.error(f"⚠️ Could not load data: {e}")
+        return None, None
+
+model = load_model()
+embeddings, documents = load_data()
+
+# -----------------------
+# Streamlit UI
+# -----------------------
 st.set_page_config(page_title="📖 Ustad Amil AI", layout="wide")
+st.title("🕌 Ustad Amil AI (Demo)")
+st.write("Ask questions and get answers from sample Islamic texts (demo PDF included).")
 
-st.title("🕌 Ustad Amil AI")
-st.write("Apne sawalat likhiye aur Quran-o-Hadith se jawab hasil kijiye (Kanzul Imaan, Hadith, aur Islami Kutub se).")
-
-# User input
 question = st.text_input("❓ Sawal likhiye:")
 
 if st.button("🔍 Pucho"):
-    if question.strip():
+    if not question.strip():
+        st.warning("Pehle apna sawal likhiye.")
+    elif embeddings is None or not documents:
+        st.error("⚠️ Data not found! Run ingest_all.py first or add PDFs in data/pdfs/")
+    else:
         try:
-            response = requests.post(
-                "http://127.0.0.1:8000/ask",
-                json={"question": question}
+            q_embed = model.encode(question)
+            sims = np.dot(embeddings, q_embed) / (
+                np.linalg.norm(embeddings, axis=1) * np.linalg.norm(q_embed)
             )
-            if response.status_code == 200:
-                data = response.json()
-                st.markdown("### ✅ Jawab:")
-                st.write(data["answer"])
-                st.markdown(f"📖 **Source:** {data.get('source', 'Unknown')}")
-            else:
-                st.error("⚠️ Backend error, please check app.py")
+            top_idx = int(np.argmax(sims))
+            best = documents[top_idx]
+
+            st.markdown("### ✅ Jawab:")
+            st.write(best["text"])
+            st.markdown(f"📖 **Source:** {best['source']}")
         except Exception as e:
             st.error(f"⚠️ Error: {e}")
-    else:
-        st.warning("Pehle sawal likhiye.")
